@@ -1,50 +1,76 @@
 import atexit
 import unittest
-import requests
+from unittest.mock import patch
+
 from pact import Consumer, Provider
 
-pact = Consumer('Translator').has_pact_with(Provider('Translate Service'), pact_dir='./pacts')
+from .functions import request_app1, request_app2, request_two_apps
 
-pact.start_service()
+app1_pact = Consumer('Translator').has_pact_with(Provider('app1'), pact_dir='./pact')
+app1_pact.start_service()
+atexit.register(app1_pact.stop_service)
 
-atexit.register(pact.stop_service)
+app2_pact = Consumer('Translator').has_pact_with(Provider('app2'), pact_dir='./pact')
 
 
 class TranslateServiceContract(unittest.TestCase):
 
-    mock_host="http://localhost:1234"
+    mock_host = "http://localhost:1234"
 
-    def _request_helper(self, path):
-        return requests.get(self.mock_host + path)
+    def test_app1_right(self):
 
-    def test_get_translation_existing(self):
-        path = '/translate/1'
+        path = '/app1/api/'
         expected_body = {"en": "one", "de": "eins"}
         expected_status = 200
-          
-        (pact
-         .given('translation for number 1')
-         .upon_receiving('a request to get translation for 1')
+
+        (app1_pact
+         .given('request app1 right')
+         .upon_receiving('a request to app1 right')
          .with_request('get', path)
          .will_respond_with(expected_status, body=expected_body))
 
-        with pact:
-          resp = self._request_helper(path)
-        
-        self.assertEqual(resp.status_code, expected_status)
-        self.assertEqual(resp.json(), expected_body)
+        with app1_pact:
+            resp = request_app1(self.mock_host)
 
-    def test_get_translation_not_existing(self):
-        path = '/translate/-1'
+        self.assertEqual(resp, 'app1 right')
+
+    def test_app1_wrong(self):
+        path = '/app1/api/'
         expected_status = 404
 
-        (pact
-         .given('no translation for number -1')
-         .upon_receiving('a request to get translation for -1')
+        (app1_pact
+         .given('request app1 wrong')
+         .upon_receiving('a request to app1 wrong')
          .with_request('get', path)
          .will_respond_with(expected_status))
 
-        with pact:
-          resp = self._request_helper(path)
+        with app1_pact:
+            resp = request_app1(self.mock_host)
 
-        self.assertEqual(resp.status_code, expected_status)
+        self.assertEqual(resp, 'app1 wrong')
+
+    def test_app2(self):
+
+        path = '/app2/api/'
+        expected_body = {"en": "one", "de": "eins"}
+        expected_status = 200
+
+        (app2_pact
+         .given('request app2')
+         .upon_receiving('a request to app2')
+         .with_request('get', path)
+         .will_respond_with(expected_status, body=expected_body))
+
+        with app2_pact:
+            resp = request_app2(self.mock_host)
+
+        self.assertEqual(resp, 'app2')
+
+    @patch('contract_tests.functions.request_app1')
+    @patch('contract_tests.functions.request_app2')
+    def test_two_apps(self, mock_request_app2, mock_request_app1):
+        mock_request_app2.return_value = 'app2'
+        mock_request_app1.return_value = 'app1'
+        resp = request_two_apps(self.mock_host, self.mock_host)
+
+        self.assertEqual(resp, 'app1app2')
